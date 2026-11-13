@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Galeri Saya</title>
+<style>
+:root{--bg:#f6f5f2;--card:#fff;--text:#1c1b19;--muted:#6b6a66;--accent:#2f6fed;--border:#e2e0da;--danger:#d14343;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#151514;--card:#222220;--text:#f0eee9;--muted:#a09e98;--accent:#6c9bff;--border:#37352f;--danger:#ff7a7a;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#151514;--card:#222220;--text:#f0eee9;--muted:#a09e98;--accent:#6c9bff;--border:#37352f;--danger:#ff7a7a;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:1000px;margin:0 auto;padding:20px 16px 60px}
+h1{font-size:1.5rem;margin:0 0 4px}
+.sub{color:var(--muted);margin:0 0 18px;font-size:.92rem}
+.drop{border:2px dashed var(--border);background:var(--card);border-radius:14px;padding:28px 16px;text-align:center;cursor:pointer;transition:.15s}
+.drop.over{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,var(--card))}
+.drop b{color:var(--accent)}
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:16px 0}
+.tab{border:1px solid var(--border);background:var(--card);color:var(--text);padding:7px 14px;border-radius:99px;cursor:pointer;font-size:.88rem}
+.tab.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.info{margin-left:auto;color:var(--muted);font-size:.85rem}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px}
+.item{position:relative;background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden;aspect-ratio:1;cursor:pointer}
+.item img,.item video{width:100%;height:100%;object-fit:cover;display:block}
+.badge{position:absolute;left:8px;bottom:8px;background:rgba(0,0,0,.65);color:#fff;font-size:.72rem;padding:2px 8px;border-radius:99px}
+.del{position:absolute;right:8px;top:8px;width:30px;height:30px;border:0;border-radius:50%;background:rgba(0,0,0,.65);color:#fff;cursor:pointer;font-size:16px;line-height:1}
+.del:hover{background:var(--danger)}
+.empty{text-align:center;color:var(--muted);padding:50px 0}
+#lb{position:fixed;inset:0;background:rgba(0,0,0,.92);display:none;align-items:center;justify-content:center;z-index:50;padding:calc(20px + env(safe-area-inset-top,0px)) 16px calc(20px + env(safe-area-inset-bottom,0px))}
+#lb.show{display:flex}
+#lb img,#lb video{max-width:100%;max-height:100%;border-radius:8px}
+#lbx{position:absolute;top:calc(12px + env(safe-area-inset-top,0px));right:16px;background:#fff2;color:#fff;border:0;border-radius:50%;width:38px;height:38px;font-size:20px;cursor:pointer}
+#toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--text);color:var(--bg);padding:9px 16px;border-radius:99px;font-size:.88rem;opacity:0;pointer-events:none;transition:.2s;z-index:60}
+#toast.show{opacity:1}
+</style>
+</head>
+<body>
+<main>
+  <h1>📷 Galeri Saya</h1>
+  <p class="sub">Foto dan video tersimpan permanen di perangkat ini, tetap ada walau halaman ditutup dan dibuka lagi.</p>
+
+  <div class="drop" id="drop"><b>Pilih file</b> atau seret foto dan video ke sini</div>
+  <input type="file" id="file" accept="image/*,video/*" multiple hidden>
+
+  <div class="bar">
+    <button class="tab on" data-f="all">Semua</button>
+    <button class="tab" data-f="image">Foto</button>
+    <button class="tab" data-f="video">Video</button>
+    <span class="info" id="info"></span>
+  </div>
+
+  <div class="grid" id="grid"></div>
+  <div class="empty" id="empty" hidden>Belum ada file. Silakan unggah foto atau video pertama Anda.</div>
+</main>
+
+<div id="lb"><button id="lbx" aria-label="Tutup">✕</button><div id="lbc"></div></div>
+<div id="toast"></div>
+
+<script>
+(function(){
+  var DB='galeri-db',STORE='media',db=null,items=[],filter='all',urls=[];
+  var $=function(id){return document.getElementById(id)};
+  var memoryMode=false;
+
+  function toast(t){var e=$('toast');e.textContent=t;e.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(function(){e.classList.remove('show')},2400)}
+
+  function open(){
+    return new Promise(function(res,rej){
+      try{
+        var r=indexedDB.open(DB,1);
+        r.onupgradeneeded=function(){r.result.createObjectStore(STORE,{keyPath:'id'})};
+        r.onsuccess=function(){res(r.result)};
+        r.onerror=function(){rej(r.error)};
+      }catch(e){rej(e)}
+    });
+  }
+  function tx(mode,fn){
+    return new Promise(function(res,rej){
+      var t=db.transaction(STORE,mode),s=t.objectStore(STORE),out=fn(s);
+      t.oncomplete=function(){res(out&&out.result)};
+      t.onerror=t.onabort=function(){rej(t.error)};
+    });
+  }
+  function loadAll(){
+    if(memoryMode)return Promise.resolve(items);
+    return tx('readonly',function(s){return s.getAll()}).then(function(a){a.sort(function(x,y){return y.added-x.added});return a});
+  }
+
+  function fmt(b){if(b<1048576)return (b/1024).toFixed(0)+' KB';if(b<1073741824)return (b/1048576).toFixed(1)+' MB';return (b/1073741824).toFixed(2)+' GB'}
+
+  function render(){
+    urls.forEach(function(u){URL.revokeObjectURL(u)});urls=[];
+    var g=$('grid');g.innerHTML='';
+    var list=items.filter(function(i){return filter==='all'||i.type.indexOf(filter)===0});
+    $('empty').hidden=list.length>0;
+    var total=items.reduce(function(a,i){return a+i.blob.size},0);
+    $('info').textContent=items.length+' file · '+fmt(total);
+    list.forEach(function(i){
+      var url=URL.createObjectURL(i.blob);urls.push(url);
+      var d=document.createElement('div');d.className='item';
+      var isV=i.type.indexOf('video')===0;
+      var m=document.createElement(isV?'video':'img');
+      m.src=url;if(isV){m.muted=true;m.preload='metadata';m.playsInline=true}else{m.loading='lazy';m.alt=i.name}
+      var b=document.createElement('span');b.className='badge';b.textContent=isV?'▶ Video':'Foto';
+      var x=document.createElement('button');x.className='del';x.textContent='✕';x.title='Hapus';
+      x.onclick=function(e){e.stopPropagation();remove(i.id,i.name)};
+      d.onclick=function(){show(url,isV)};
+      d.appendChild(m);d.appendChild(b);d.appendChild(x);g.appendChild(d);
+    });
+  }
+
+  function show(url,isV){
+    var c=$('lbc');c.innerHTML='';
+    var m=document.createElement(isV?'video':'img');m.src=url;
+    if(isV){m.controls=true;m.autoplay=true;m.playsInline=true}
+    c.appendChild(m);$('lb').classList.add('show');
+  }
+  function closeLb(){$('lb').classList.remove('show');$('lbc').innerHTML=''}
+  $('lbx').onclick=closeLb;
+  $('lb').onclick=function(e){if(e.target===$('lb'))closeLb()};
+  document.addEventListener('keydown',function(e){if(e.key==='Escape')closeLb()});
+
+  function remove(id,name){
+    if(!confirm('Hapus “'+name+'” secara permanen?'))return;
+    var p=memoryMode?Promise.resolve():tx('readwrite',function(s){s.delete(id)});
+    p.then(function(){items=items.filter(function(i){return i.id!==id});render();toast('File dihapus')});
+  }
+
+  function add(files){
+    files=Array.prototype.filter.call(files,function(f){return /^(image|video)\//.test(f.type)});
+    if(!files.length){toast('Hanya foto dan video yang didukung');return}
+    var n=0,chain=Promise.resolve();
+    files.forEach(function(f,k){
+      chain=chain.then(function(){
+        var rec={id:Date.now()+'-'+k+'-'+Math.random().toString(36).slice(2,7),name:f.name,type:f.type,blob:f,added:Date.now()+k};
+        var p=memoryMode?Promise.resolve():tx('readwrite',function(s){s.put(rec)});
+        return p.then(function(){items.unshift(rec);n++}).catch(function(){toast('Gagal menyimpan “'+f.name+'” (penyimpanan penuh?)')});
+      });
+    });
+    chain.then(function(){render();if(n)toast(n+' file tersimpan')});
+  }
+
+  $('drop').onclick=function(){$('file').click()};
+  $('file').onchange=function(e){add(e.target.files);e.target.value=''};
+  ['dragenter','dragover'].forEach(function(ev){$('drop').addEventListener(ev,function(e){e.preventDefault();$('drop').classList.add('over')})});
+  ['dragleave','drop'].forEach(function(ev){$('drop').addEventListener(ev,function(e){e.preventDefault();$('drop').classList.remove('over')})});
+  $('drop').addEventListener('drop',function(e){add(e.dataTransfer.files)});
+
+  document.querySelectorAll('.tab').forEach(function(t){
+    t.onclick=function(){document.querySelectorAll('.tab').forEach(function(x){x.classList.remove('on')});t.classList.add('on');filter=t.dataset.f;render()};
+  });
+
+  open().then(function(d){
+    db=d;
+    try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist()}catch(e){}
+    return loadAll();
+  }).then(function(a){items=a;render()}).catch(function(){
+    memoryMode=true;render();
+    toast('Penyimpanan permanen tidak tersedia, file hanya sementara');
+  });
+})();
+</script>
+</body>
+</html>
